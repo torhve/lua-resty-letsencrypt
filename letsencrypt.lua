@@ -418,18 +418,147 @@ file.exists = function(fname)
     local f = io.open(fname, "r")
     if f ~= nil then io.close(f) return true else return false end
 end
+-- Rudimentary lock helper on top og ngx.shared.DICT
+local Lock = {}
+Lock.new = function(timeout)
+    if not timeout then
+        timeout = 10
+    end
+
+    local dict = ngx.shared.acme
+    if not dict then
+        return nil, 'nginx shared dict not found'
+    end
+
+    return setmetatable({
+        timeout=timeout,
+        dict=dict
+    }, { __index = Lock })
+end
+
+Lock.lock = function(self, name)
+    local key = '_lock:'..name
+    local exptime = self.timeout
+    local dict = self.dict
+    local ok, err = dict:add(key, true, exptime)
+    if ok then
+        return 0
+    end
+
+    if err ~= "exists" then
+        return nil, err
+    end
+    -- Lock in use by someone else
+
+    local elapsed = 0
+    local step = 0.001
+    local max_step = 0.5
+    local ratio = 2
+    while exptime > 0 do
+        if step > exptime then
+            step = exptime
+        end
+
+        ngx.sleep(step)
+        elapsed = elapsed + step
+        exptime = exptime - step
+        -- luacheck: ignore ok err
+        local ok, err = dict:add(key, true, self.timeout)
+        if ok then
+            return elapsed
+        end
+
+        if err ~= "exists" then
+            return nil, err
+        end
+
+        if exptime <= 0 then
+            break
+        end
+
+        step = step * ratio
+        if step <= 0 then
+            step = 0.001
+        end
+
+        if step > max_step then
+            step = max_step
+        end
+    end
+    return nil, 'timeout'
+end
+
+Lock.unlock = function(self, name)
+    local key = '_lock:'..name
+    local dict = self.dict
+    local ok, err = dict:delete(key)
+    if not ok then
+        return nil, err
+    end
+
+    return 1
+end
+
+-- A caching file loader
+file.load = function(fname)
+    local cache = ngx.shared.acme
+    local key = '_fcache:'..fname
+
+    local val, err = cache:get(key)
+    if not val then
+        local lock = Lock.new()
+        lock:lock(key)
+        -- Check again
+        val, err = cache:get(key)
+        if val then
+            lock:unlock(key)
+            return val, err
+        end
+        local f
+        f, err = io.open(fname)
+        if not f then return f, err end
+        local data = f:read("*a")
+        f:close()
+        -- Update cache
+        cache:set(key, data)
+        lock:unlock(key)
+        return data, err
+    end
+    return val, err
+end
+
 
 _M.new = function(conf)
     local account_file = conf.root..'account.json'
     local account_data = file.loadjson(account_file)
     local key_file = account_file:gsub("%.json$", "") .. ".key"
-    return setmetatable({ conf = conf, account_file = account_file, account_data = account_data, key_file = key_file }, { __index = _M })
+    local lock = Lock.new()
+    -- Flush caches, this makes it possible recheck cert files and reload files
+    -- on nginx reload, since init_by_lua is ran.
+    ngx.shared.acme:flush_all()
+    return setmetatable({
+        conf = conf,
+        account_file = account_file,
+        account_data = account_data,
+        key_file = key_file,
+        lock = lock,
+    }, { __index = _M })
 end
 
 _M.init_account = function(self)
     local account
+    local elapsed, err = self.lock:lock('account')
+    if elapsed > 0 then
+        log('Account lock took: %s', elapsed)
+    end
+    if err then
+        log('Account lock error: %s', err)
+    end
+
+
     if not self.account_data then
         log('Registering new account')
+        -- Set account creation lock
         self.account_data = {}
 
         local key = file.load(self.key_file)
@@ -440,6 +569,7 @@ _M.init_account = function(self)
 
         self.account_data.directory_url = self.conf.directory_url
         account = assert(acme.new(key, self.conf.directory_url, http_request))
+        -- luacheck: ignore err
         local reg, err = account.step({resource='new-reg', contact={self.conf.contact}, agreement=self.conf.agreement})
         --local reg, err = account.step({resource = 'new-reg', agreement = agreement})
         if not reg then
@@ -464,17 +594,17 @@ _M.init_account = function(self)
         self.account_data.hosts = self.hosts
     end
 
+    self.lock:unlock('account')
+
     return account, self.hosts
 end
 
 _M.cert_for_host = function(self, host)
     local account, hosts = self:init_account()
     local authz = hosts[host]
-
     if not authz then
         local cert = file.load(self.conf.root..host..".der")
         if cert then
-            log('Loading cert from file: %s.der', host)
             cert = x509.new(cert, "DER")
             -- luacheck: ignore issued
             local issued, expires = assert(cert:getLifetime())
@@ -547,7 +677,6 @@ _M.cert_for_host = function(self, host)
                             challenge_test.describe(account, host, challenge.token)
                             assert(file.savejson(self.account_file, self.account_data))
                             log("Complete this challenge and run this again")
-                            ngx.exit(200)
                         end
                     end
 
@@ -661,8 +790,17 @@ _M.ssl = function(self)
         return ngx.exit(ngx.ERROR)
     end
 
-    -- Check and generate certs
+    -- First check cache for existing cert for this hostname
+    -- if not try to generate.
+
+    -- TODO: do expiry check every x number of requests, since right now the
+    -- check would only be ran on nginx restart
+
+    -- Check and generate certs behind lock, so we don't run multiple session
+    -- to letsencrypt at the same time.
+    self.lock:lock('cert:'..ssl_hostname)
     self:cert_for_host(ssl_hostname)
+    self.lock:unlock('cert:'..ssl_hostname)
 
     local der = self.conf.root..ssl_hostname..'.der'
     ok, err  = ssl.set_der_cert(file.load(der))
@@ -703,6 +841,7 @@ local challenge = function(self)
 end
 
 local debug_output = function(self)
+
     local ssl_hostname = ssl.server_name() or ''
     -- Debug handler:
     -- Set default content type

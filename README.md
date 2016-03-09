@@ -129,9 +129,8 @@ TODO
 ====
 
 - Specify allowed host names
-- Use lua-resty-lock to only send 1 letsencrypt request at the time
 - Alternative storage for certs/account (i.e. redis)
-- Cache certs in mem using ngx.shared
+- Extensible caching
 - Configurable logging
 - Use Squish to generate one big file: http://matthewwild.co.uk/projects/squish/readme.html or https://code.zash.se/luaunbound/file/tip/squish.sh
 
