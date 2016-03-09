@@ -32,7 +32,7 @@ In practice this means that on first HTTPS connection from a web client to the w
 - Get signed cert from LetsEncrypt and store it on the filesystem
 - Continue SSL handshake with client using the newly issued cert
 
-On subsequent requests the certs will be loaded from filesystem, and if expiry date is less than a week a new certificate will be requested from LetsEncrypt.
+On subsequent requests the certs will be loaded from filesystem and cached in nginx mem, and if expiry date is less than a week a new certificate will be requested from LetsEncrypt.
 
 This software uses the ssl_certificate_by_lua functionality in OpenResty 1.9.7.2+.
 This software requires an nginx build with OpenSSL version at least 1.0.2e.
