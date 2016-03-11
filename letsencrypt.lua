@@ -35,8 +35,8 @@ local http = require "resty.http" -- https://github.com/pintsized/lua-resty-http
 
 local _M = {}
 
--- NGINX shared worker memory. in nginx.conf:  lua_shared_dict acme 512k
-_M.ngx_mem = ngx.shared.acme
+-- NGINX shared worker memory. in nginx.conf:  lua_shared_dict acme 1m
+_M.cache = ngx.shared.acme
 
 local tableHasValue = function(table, value)
     if(type(table) ~= 'table') then return end
@@ -435,7 +435,7 @@ Lock.new = function(timeout)
         timeout = 10
     end
 
-    local dict = ngx.shared.acme
+    local dict = _M.cache
     if not dict then
         return nil, 'nginx shared dict not found'
     end
@@ -511,7 +511,7 @@ end
 
 -- A caching file loader
 file.load = function(fname)
-    local cache = ngx.shared.acme
+    local cache = _M.cache
     local key = '_fcache:'..fname
 
     local val, err = cache:get(key)
@@ -548,7 +548,7 @@ _M.new = function(conf)
     local lock = Lock.new()
     -- Flush caches, this makes it possible recheck cert files and reload files
     -- on nginx reload, since init_by_lua is ran.
-    ngx.shared.acme:flush_all()
+    _M.cache:flush_all()
     return setmetatable({
         conf = conf,
         account_file = account_file,
