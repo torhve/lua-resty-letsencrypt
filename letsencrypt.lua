@@ -518,7 +518,10 @@ file.load = function(fname)
         end
         local f
         f, err = io.open(fname)
-        if not f then return f, err end
+        if not f then
+            lock:unlock(key)
+            return f, err
+        end
         local data = f:read("*a")
         f:close()
         -- Update cache
@@ -599,6 +602,21 @@ _M.init_account = function(self)
     self.lock:unlock('account')
 
     return account, self.hosts
+end
+
+_M.get_intermediate = function(self)
+    -- Unused function for now, as the .crt contains the intermediate.
+    local fname = self.conf.root.."intermediate.crt"
+    local data = file.load(fname)
+    if not data then
+        local req, _ = http_request'http://cert.int-x1.letsencrypt.org/'
+        if req then
+            data = req
+            file.save(fname, data)
+            log('Saved intermediate cert to: %s', fname)
+        end
+    end
+    return data
 end
 
 _M.cert_for_host = function(self, host)
@@ -811,18 +829,30 @@ _M.ssl = function(self)
         return ngx.exit(ngx.ERROR)
     end
 
-    local der = self.conf.root..ssl_hostname..'.der'
-    ok, err  = ssl.set_der_cert(file.load(der))
+    local pem = file.load(self.conf.root..ssl_hostname..'.crt')
+
+    local der_chain
+    -- TODO: cache the pem_to_der conversion
+    -- reason we don't use the DER-file directly is that .crt contain
+    -- the intermediate certificate.
+    -- See also: https://github.com/openresty/lua-resty-core/blob/master/lib/ngx/ssl.md#cert_pem_to_der
+    der_chain, err = ssl.cert_pem_to_der(pem)
+    if not der_chain then
+        log('Error %s, while converting pem chain to der', err)
+    end
+
+    ok, err = ssl.set_der_cert(der_chain)
     if not ok then
-        log('Error %s, while setting der cert with filename %s', err, der)
+        log('Error %s, while setting der cert', err)
     end
 
     local pkey_filename = self.conf.root..ssl_hostname..'.key'
     local der_priv
     der_priv, err = ssl.priv_key_pem_to_der(file.load(pkey_filename))
-    if not ok then
+    if not der_priv then
         log('Error %s, while converting priv key with filename %s', err, pkey_filename)
     end
+
     ok, err = ssl.set_der_priv_key(der_priv)
     if not ok then
         log('Error %s, while setting der key with filename %s', err, pkey_filename)

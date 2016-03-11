@@ -134,8 +134,11 @@ TODO
 - Specify allowed host names
 - Alternative storage for certs/account (i.e. redis)
 - Extensible caching
+- Rate limits so we ensure we don't send too many requests to LetsEncrypt
+- Cache cert conversion
 - Configurable logging
 - Use Squish to generate one big file: http://matthewwild.co.uk/projects/squish/readme.html or https://code.zash.se/luaunbound/file/tip/squish.sh
+- Write FFI to openssl to have one less dependency?
 
 [Back to TOC](#table-of-contents)
 
