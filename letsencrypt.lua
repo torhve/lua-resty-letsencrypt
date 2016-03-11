@@ -31,6 +31,7 @@ SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
 local ngx = ngx
 local ssl = require 'ngx.ssl'
+local ocsp = require 'ngx.ocsp'
 local http = require "resty.http" -- https://github.com/pintsized/lua-resty-http
 
 local _M = {}
@@ -62,27 +63,31 @@ local log = function(s, ...)
 end
 
 -- HTTP request
-local http_request = function(uri, post_body)
+local http_request = function(uri, post_body, options)
     local httpc = http.new()
     httpc:set_timeout(5000)
     local method = "POST"
     if not post_body then
         method = 'GET'
     end
-    log('HTTP request: %s, method: %s, body: %s', uri, method, post_body)
-    local res, err = httpc:request_uri(uri, {
+    local defoptions = {
         method = method,
         body = post_body,
         ssl_verify = false,
-    })
+    }
+    for k, v in pairs(options or {}) do
+        defoptions[k] = v
+    end
+    log('HTTP request: %s', uri)
+    local res, err = httpc:request_uri(uri, defoptions)
 
     if not res then
-        return nil, 500, "failed to request: " .. tostring(err)
+        return nil, 500, res.headers, "failed to request: " .. tostring(err)
     end
 
     --log('HTTP requested finished: %s bytes, status: %s', #res.body, res.status)
 
-    return res.body, tonumber(res.status), res.headers, tonumber(res.status)
+    return res.body, tonumber(res.status), res.headers, err
 
 end
 
@@ -804,6 +809,69 @@ _M.cert_for_host = function(self, host)
     assert(file.savejson(self.account_file, self.account_data))
 end
 
+_M.get_ocsp_response = function(self, fullchain_der)
+    local responder, err = ocsp.get_ocsp_responder_from_der_chain(fullchain_der)
+    if not responder then
+        return nil, 'Error when getting OCSP responder: '..tostring(err)
+    end
+
+    local request, or_err = ocsp.create_ocsp_request(fullchain_der)
+    if not request then
+        return nil, 'Error when creating OCSP request: '..tostring(or_err)
+    end
+
+    local res, _, _, h_err = http_request(responder, request, {
+        headers = {
+            ['Content-Type'] = 'application/ocsp-request'
+        }
+    })
+    if not res then
+        return nil, 'Error when fetching OCSP: '..tostring(h_err)
+    end
+
+    local ok, v_err = ocsp.validate_ocsp_response(res, fullchain_der)
+    if not ok then
+        return nil, 'Error when validating OCSP response: '..tostring(v_err)
+    end
+
+    return res
+end
+
+_M.ocsp_staple = function(self, domain, fullchain_der)
+    local function set_ocsp_status_resp(ocsp_r)
+        local ok, ocsp_set_err = ocsp.set_ocsp_status_resp(ocsp_r)
+        if not ok then
+            log('Failed to set OCSP: %s', ocsp_set_err)
+            return false
+        end
+        return true
+    end
+
+    local key = 'ocsp:'..domain
+
+    local res = self.cache:get(key)
+    if not res then
+        self.lock:lock('ocsp_staple:'..tostring(domain))
+        -- Check if another created
+        res = self.cache:get(key)
+        if res then
+            self.lock:unlock('ocsp_staple:'..tostring(domain))
+            return set_ocsp_status_resp(res)
+        end
+        local ocsp_res, err = self:get_ocsp_response(fullchain_der)
+        if not ocsp_res then
+            log(err)
+        else
+            -- Expire one hour by default
+            self.cache:set(key, ocsp_res, 3600)
+            res = ocsp_res
+        end
+        self.lock:unlock('ocsp_staple:'..tostring(domain))
+    end
+
+    return set_ocsp_status_resp(res)
+end
+
 _M.ssl = function(self)
     local ssl_hostname = ssl.server_name() or ''
 
@@ -854,6 +922,10 @@ _M.ssl = function(self)
     if not der_chain then
         log('Error %s, while converting pem chain to der', err)
     end
+
+
+    -- Staple !
+    self:ocsp_staple(ssl_hostname, der_chain)
 
     ok, err = ssl.set_der_cert(der_chain)
     if not ok then
