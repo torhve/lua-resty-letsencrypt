@@ -38,6 +38,14 @@ local _M = {}
 -- NGINX shared worker memory. in nginx.conf:  lua_shared_dict acme 512k
 _M.ngx_mem = ngx.shared.acme
 
+local tableHasValue = function(table, value)
+    if(type(table) ~= 'table') then return end
+
+    for _, v in next, table do
+        if(v == value) then return true end
+    end
+end
+
 local safeFormat = function(format, ...)
     if(select('#', ...) > 0) then
         local success, message = pcall(string.format, format, ...)
@@ -638,7 +646,7 @@ _M.cert_for_host = function(self, host)
         end
 
         if not cert then
-            log('No cert. Creating authz.')
+            log('No cert for hostname: %s. Creating authz.', host)
             -- Create new authz request
             local newdata, err = account.new_dns_authz(host)
             if not newdata then
@@ -799,9 +807,15 @@ end
 _M.ssl = function(self)
     local ssl_hostname = ssl.server_name() or ''
 
+    -- Check if ssl_hostname is in list of allowed domains
+    if not tableHasValue(self.conf.domains, ssl_hostname) then
+        log('Request for non-configured domain: %s. Returning fallback cert.', ssl_hostname)
+        return
+    end
+
     local ok, err, _
 
-    -- First check cache for existing cert for this hostname
+    -- Check cache for existing cert for this hostname
     -- if not try to generate.
 
     -- TODO: do expiry check every x number of requests, since right now the

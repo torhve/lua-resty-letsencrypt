@@ -96,6 +96,7 @@ init_by_lua_block  {
     -- Using staging dir by default, please test by using that first.
     -- Once you feel ready you can uncomment the second line
     local conf = {
+        domains = {'www.example.com', 'example.com'}, -- domains that we should fetch certs for
         root = '/etc/nginx/letsencrypt/', -- Trailing slash is important. Must be included.
         directory_url = "https://acme-staging.api.letsencrypt.org/directory",
         --directory_url ="https://acme-v01.api.letsencrypt.org/directory"
@@ -131,7 +132,7 @@ Start nginx and pay attention to error.log for any messages.
 TODO
 ====
 
-- Specify allowed host names
+- Request multiple domains in certs.
 - Alternative storage for certs/account (i.e. redis)
 - Extensible caching
 - Rate limits so we ensure we don't send too many requests to LetsEncrypt
