@@ -849,6 +849,8 @@ _M.ocsp_staple = function(self, domain, fullchain_der)
 
     local key = 'ocsp:'..domain
 
+    -- TODO: cache negative OCSP response so we do not hammer the OCSP backend
+
     local res = self.cache:get(key)
     if not res then
         self.lock:lock('ocsp_staple:'..tostring(domain))
@@ -861,6 +863,8 @@ _M.ocsp_staple = function(self, domain, fullchain_der)
         local ocsp_res, err = self:get_ocsp_response(fullchain_der)
         if not ocsp_res then
             log(err)
+            self.lock:unlock('ocsp_staple:'..tostring(domain))
+            return false
         else
             -- Expire one hour by default
             self.cache:set(key, ocsp_res, 3600)
