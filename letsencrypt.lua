@@ -72,6 +72,8 @@ local http_request = function(uri, post_body)
         return nil, 500, "failed to request: " .. tostring(err)
     end
 
+    --log('HTTP requested finished: %s bytes, status: %s', #res.body, res.status)
+
     return res.body, tonumber(res.status), res.headers, tonumber(res.status)
 
 end
@@ -583,7 +585,7 @@ _M.init_account = function(self)
     if self.account then
         account = self.account
     else -- Load from file
-        account = assert(acme.new(assert(file.load(self.key_file)), self.account_data.directory_url))
+        account = assert(acme.new(assert(file.load(self.key_file)), self.account_data.directory_url, http_request))
     end
 
     self.account = account
@@ -781,15 +783,6 @@ _M.ssl = function(self)
 
     local ok, err, _
 
-    -- clear the fallback certificates and private keys
-    -- set by the ssl_certificate and ssl_certificate_key
-    -- directives
-    ok, _ = ssl.clear_certs()
-    if not ok then
-        log"failed to clear existing (fallback) certificates"
-        return ngx.exit(ngx.ERROR)
-    end
-
     -- First check cache for existing cert for this hostname
     -- if not try to generate.
 
@@ -799,8 +792,24 @@ _M.ssl = function(self)
     -- Check and generate certs behind lock, so we don't run multiple session
     -- to letsencrypt at the same time.
     self.lock:lock('cert:'..ssl_hostname)
-    self:cert_for_host(ssl_hostname)
+    ok, err = pcall(function() -- Run in a protected call in case of any errors
+        self:cert_for_host(ssl_hostname)
+    end)
     self.lock:unlock('cert:'..ssl_hostname)
+    if not ok then
+        log('Unable to generate cert: %s', err)
+        debug.traceback()
+        return
+    end
+
+    -- clear the fallback certificates and private keys
+    -- set by the ssl_certificate and ssl_certificate_key
+    -- directives
+    ok, _ = ssl.clear_certs()
+    if not ok then
+        log"failed to clear existing (fallback) certificates"
+        return ngx.exit(ngx.ERROR)
+    end
 
     local der = self.conf.root..ssl_hostname..'.der'
     ok, err  = ssl.set_der_cert(file.load(der))
@@ -819,7 +828,10 @@ _M.ssl = function(self)
         log('Error %s, while setting der key with filename %s', err, pkey_filename)
     end
 
-    -- End phase.
+    -- TODO: check that we actually managed to read valid certs and set them,
+    -- if we didn't we should read back the fallback certs.
+
+    -- End Nginx phase.
     return
 end
 

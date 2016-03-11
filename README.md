@@ -76,6 +76,9 @@ Configuration
 Example `nginx.conf`
 
 ```
+# HTTP client needs a resolver. Use google as an example:
+
+resolver 8.8.8.8;
 # Storage for challenge token and cert cache
 lua_shared_dict acme 1m;
 server {
