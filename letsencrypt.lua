@@ -109,21 +109,19 @@ end
 local b64url = require'b64url'.encode
 package.preload['acme.error'] = function()
     return {
-        parse = function()
+        parse = function(err)
             local err_mt = {}
 
             function err_mt:__tostring()
                 return ("%d{%s}%s"):format(self.status or -1, self.type, self.detail or "")
             end
 
-            local function parse_error(err)
-                local jerr = json.decode(err)
-                if jerr then
-                    return setmetatable(jerr, err_mt)
-                end
-                return err
+            local jerr = json.decode(err)
+            if jerr then
+                setmetatable(jerr, err_mt)
+                return jerr
             end
-          return parse_error
+            return err
         end
     }
 end
@@ -591,7 +589,7 @@ _M.init_account = function(self)
         local reg, err = account.step({resource='new-reg', contact={self.conf.contact}, agreement=self.conf.agreement})
         --local reg, err = account.step({resource = 'new-reg', agreement = agreement})
         if not reg then
-            log('Error registering with ACME server: %s',tostring(err()))
+            log('Error registering with ACME server: %s',tostring(err))
         else
             log('Registration OK!')
             self.account_data.reg = reg
