@@ -682,7 +682,7 @@ _M.cert_for_host = function(self, host)
                     local challenge_test = http_challenge()
                     local key_authz = account.get_key_authz(challenge.token)
                     if challenge.type == "http-01" then
-                        self.ngx_mem:set('token:'..challenge.token, key_authz)
+                        self.cache:set('token:'..challenge.token, key_authz)
                     end
 
                     while challenge.status == "pending" and not challenge.keyAuthorization do
@@ -962,7 +962,7 @@ local challenge = function(self)
         ngx.exit(404)
     end
     log('Getting request for token: %s', token)
-    local authz = self.ngx_mem:get('token:'..token)
+    local authz = self.cache:get('token:'..token)
     if not authz then
         ngx.exit(404)
     else
