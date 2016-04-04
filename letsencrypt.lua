@@ -82,7 +82,7 @@ local http_request = function(uri, post_body, options)
     local res, err = httpc:request_uri(uri, defoptions)
 
     if not res then
-        return nil, 500, res.headers, "failed to request: " .. tostring(err)
+        return nil, 500, nil, "failed to request: " .. tostring(err)
     end
 
     --log('HTTP requested finished: %s bytes, status: %s', #res.body, res.status)
@@ -109,21 +109,19 @@ end
 local b64url = require'b64url'.encode
 package.preload['acme.error'] = function()
     return {
-        parse = function()
+        parse = function(err)
             local err_mt = {}
 
             function err_mt:__tostring()
                 return ("%d{%s}%s"):format(self.status or -1, self.type, self.detail or "")
             end
 
-            local function parse_error(err)
-                local jerr = json.decode(err)
-                if jerr then
-                    return setmetatable(jerr, err_mt)
-                end
-                return err
+            local jerr = json.decode(err)
+            if jerr then
+                setmetatable(jerr, err_mt)
+                return jerr
             end
-          return parse_error
+            return err
         end
     }
 end
@@ -591,7 +589,7 @@ _M.init_account = function(self)
         local reg, err = account.step({resource='new-reg', contact={self.conf.contact}, agreement=self.conf.agreement})
         --local reg, err = account.step({resource = 'new-reg', agreement = agreement})
         if not reg then
-            log('Error registering with ACME server: %s',tostring(err()))
+            log('Error registering with ACME server: %s',tostring(err))
         else
             log('Registration OK!')
             self.account_data.reg = reg
@@ -906,16 +904,12 @@ _M.ssl = function(self)
         return
     end
 
-    -- clear the fallback certificates and private keys
-    -- set by the ssl_certificate and ssl_certificate_key
-    -- directives
-    ok, _ = ssl.clear_certs()
-    if not ok then
-        log"failed to clear existing (fallback) certificates"
-        return ngx.exit(ngx.ERROR)
-    end
+    local pem, err = file.load(self.conf.root..ssl_hostname..'.crt')
 
-    local pem = file.load(self.conf.root..ssl_hostname..'.crt')
+    if err then
+      log('Error reading cert: %s', err)
+      return
+    end
 
     local der_chain
     -- TODO: cache the pem_to_der conversion
@@ -925,11 +919,23 @@ _M.ssl = function(self)
     der_chain, err = ssl.cert_pem_to_der(pem)
     if not der_chain then
         log('Error %s, while converting pem chain to der', err)
+        return
     end
 
 
     -- Staple !
     self:ocsp_staple(ssl_hostname, der_chain)
+
+
+    -- clear the fallback certificates and private keys
+    -- set by the ssl_certificate and ssl_certificate_key
+    -- directives
+    ok, _ = ssl.clear_certs()
+    if not ok then
+        log"failed to clear existing (fallback) certificates"
+        return ngx.exit(ngx.ERROR)
+    end
+
 
     ok, err = ssl.set_der_cert(der_chain)
     if not ok then
