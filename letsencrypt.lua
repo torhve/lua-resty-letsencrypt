@@ -82,7 +82,7 @@ local http_request = function(uri, post_body, options)
     local res, err = httpc:request_uri(uri, defoptions)
 
     if not res then
-        return nil, 500, res.headers, "failed to request: " .. tostring(err)
+        return nil, 500, nil, "failed to request: " .. tostring(err)
     end
 
     --log('HTTP requested finished: %s bytes, status: %s', #res.body, res.status)
