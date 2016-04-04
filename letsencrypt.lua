@@ -904,14 +904,6 @@ _M.ssl = function(self)
         return
     end
 
-    -- clear the fallback certificates and private keys
-    -- set by the ssl_certificate and ssl_certificate_key
-    -- directives
-    ok, _ = ssl.clear_certs()
-    if not ok then
-        log"failed to clear existing (fallback) certificates"
-        return ngx.exit(ngx.ERROR)
-    end
 
     local pem = file.load(self.conf.root..ssl_hostname..'.crt')
 
@@ -923,11 +915,23 @@ _M.ssl = function(self)
     der_chain, err = ssl.cert_pem_to_der(pem)
     if not der_chain then
         log('Error %s, while converting pem chain to der', err)
+        return
     end
 
 
     -- Staple !
     self:ocsp_staple(ssl_hostname, der_chain)
+
+
+    -- clear the fallback certificates and private keys
+    -- set by the ssl_certificate and ssl_certificate_key
+    -- directives
+    ok, _ = ssl.clear_certs()
+    if not ok then
+        log"failed to clear existing (fallback) certificates"
+        return ngx.exit(ngx.ERROR)
+    end
+
 
     ok, err = ssl.set_der_cert(der_chain)
     if not ok then
