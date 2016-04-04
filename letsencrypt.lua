@@ -904,8 +904,12 @@ _M.ssl = function(self)
         return
     end
 
+    local pem, err = file.load(self.conf.root..ssl_hostname..'.crt')
 
-    local pem = file.load(self.conf.root..ssl_hostname..'.crt')
+    if err then
+      log('Error reading cert: %s', err)
+      return
+    end
 
     local der_chain
     -- TODO: cache the pem_to_der conversion
