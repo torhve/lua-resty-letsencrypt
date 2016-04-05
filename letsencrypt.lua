@@ -82,7 +82,7 @@ local http_request = function(uri, post_body, options)
     local res, err = httpc:request_uri(uri, defoptions)
 
     if not res then
-        return nil, 500, res.headers, "failed to request: " .. tostring(err)
+        return nil, 500, nil, "failed to request: " .. tostring(err)
     end
 
     --log('HTTP requested finished: %s bytes, status: %s', #res.body, res.status)
@@ -906,16 +906,12 @@ _M.ssl = function(self)
         return
     end
 
-    -- clear the fallback certificates and private keys
-    -- set by the ssl_certificate and ssl_certificate_key
-    -- directives
-    ok, _ = ssl.clear_certs()
-    if not ok then
-        log"failed to clear existing (fallback) certificates"
-        return ngx.exit(ngx.ERROR)
+    local pem
+    pem, err = file.load(self.conf.root..ssl_hostname..'.crt')
+    if not pem then
+        log('Error reading cert: %s', err)
+        return -- Return in case of error, so fallback certs
     end
-
-    local pem = file.load(self.conf.root..ssl_hostname..'.crt')
 
     local der_chain
     -- TODO: cache the pem_to_der conversion
@@ -925,8 +921,17 @@ _M.ssl = function(self)
     der_chain, err = ssl.cert_pem_to_der(pem)
     if not der_chain then
         log('Error %s, while converting pem chain to der', err)
+        return
     end
 
+    -- clear the fallback certificates and private keys
+    -- set by the ssl_certificate and ssl_certificate_key
+    -- directives
+    ok, _ = ssl.clear_certs()
+    if not ok then
+        log"failed to clear existing (fallback) certificates"
+        return ngx.exit(ngx.ERROR)
+    end
 
     -- Staple !
     self:ocsp_staple(ssl_hostname, der_chain)
