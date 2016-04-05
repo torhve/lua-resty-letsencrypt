@@ -644,8 +644,7 @@ _M.cert_for_host = function(self, host)
 
         --log(os.date("Issued:  %F", issued))
         --log(os.date("Expires: %F", expires))
-        -- TODO: use ngx time
-        if os.time() + (86400 * 7 * 3) > expires then
+        if ngx.now() + (86400 * 7 * 3) > expires then
             log("Renewal time")
             cert = false
             if authz then
