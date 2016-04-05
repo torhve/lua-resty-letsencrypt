@@ -670,7 +670,7 @@ _M.cert_for_host = function(self, host)
                 log("Updating authz...")
                 local updated, err = account.unsigned_request(authz.head.location or authz.url)
                 if not updated then
-                    log("Failed to update authz: %s", tostring(err))
+                    log("Failed to update authz: %s", tostring(err()))
                     break
                 else
                     hosts[host], authz = updated, updated
@@ -714,7 +714,7 @@ _M.cert_for_host = function(self, host)
                     end
 
                     while challenge.keyAuthorization and challenge.status == "pending" do
-                        ngx.sleep(0.5)
+                        ngx.sleep(2) -- Sleep 2 seconds
                         local updated_challenge, err = account.unsigned_request(challenge.uri)
                         if updated_challenge then
                             authz.body.challenges[i] = updated_challenge.body
