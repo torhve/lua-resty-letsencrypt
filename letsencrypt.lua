@@ -635,33 +635,34 @@ end
 _M.cert_for_host = function(self, host)
     local account, hosts = self:init_account()
     local authz = hosts[host]
-    if not authz then
-        local cert = file.load(self.conf.root..host..".der")
-        if cert then
-            cert = x509.new(cert, "DER")
-            -- luacheck: ignore issued
-            local issued, expires = assert(cert:getLifetime())
 
-            --log(os.date("Issued:  %F", issued))
-            --log(os.date("Expires: %F", expires))
-            if os.time() + (86400 * 7 * 3) > expires then
-                log("Renewal time")
-                cert = false
+    local cert = file.load(self.conf.root..host..".der")
+    if cert then
+        cert = x509.new(cert, "DER")
+        -- luacheck: ignore issued
+        local issued, expires = assert(cert:getLifetime())
+
+        --log(os.date("Issued:  %F", issued))
+        --log(os.date("Expires: %F", expires))
+        -- TODO: use ngx time
+        if os.time() + (86400 * 7 * 3) > expires then
+            log("Renewal time")
+            cert = false
+            if authz then
+                authz.need_udpdate = true;
             end
         end
+    end
 
-        if not cert then
-            log('No cert for hostname: %s. Creating authz.', host)
-            -- Create new authz request
-            local newdata, err = account.new_dns_authz(host)
-            if not newdata then
-                log(tostring(err), "")
-            else
-                hosts[host], authz = newdata, newdata
-            end
+    if not authz and not cert then
+        log('No cert for hostname: %s. Creating authz.', host)
+        -- Create new authz request
+        local newdata, err = account.new_dns_authz(host)
+        if not newdata then
+            log(tostring(err), "")
+        else
+            hosts[host], authz = newdata, newdata
         end
-    else
-        authz.need_update = true
     end
 
     if authz then
@@ -776,16 +777,16 @@ _M.cert_for_host = function(self, host)
                 file.save(self.conf.root..host..".csr", csr:tostring())
             end
 
-            local cert, err = account.step({
+            local newcert, err = account.step({
                 resource = "new-cert",
                 csr = b64url(csr:tostring("DER")),
             })
 
-            if cert then
-                if cert.head["content-type"] == "application/pkix-cert" then
-                    file.save(self.conf.root..host..".der", cert.body)
-                    local pem_crt = tostring(x509.new(cert.body, "DER"))
-                    for link, rel in string.gmatch(cert.head.link or "", "<(.-)>;rel=\"(.-)\"") do
+            if newcert then
+                if newcert.head["content-type"] == "application/pkix-cert" then
+                    file.save(self.conf.root..host..".der", newcert.body)
+                    local pem_crt = tostring(x509.new(newcert.body, "DER"))
+                    for link, rel in string.gmatch(newcert.head.link or "", "<(.-)>;rel=\"(.-)\"") do
                         if rel == "up" then
                             local up = account.unsigned_request(link)
                             if up then
@@ -797,10 +798,10 @@ _M.cert_for_host = function(self, host)
                         os.rename(host..".crt", host..".crt.old")
                     end
                     file.save(self.conf.root..host..".crt", pem_crt)
-                    cert.body = nil
+                    newcert.body = nil
                 end
                 hosts[host] = nil
-                file.savejson(self.conf.root..host..".json", cert)
+                file.savejson(self.conf.root..host..".json", newcert)
             else
                 log("Error requesting certificate: %s", tostring(err))
             end
