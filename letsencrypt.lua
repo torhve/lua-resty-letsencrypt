@@ -648,7 +648,7 @@ _M.cert_for_host = function(self, host)
             log("Renewal time")
             cert = false
             if authz then
-                authz.need_udpdate = true;
+                authz.need_update = true;
             end
         end
     end
@@ -933,13 +933,13 @@ _M.ssl = function(self)
         return ngx.exit(ngx.ERROR)
     end
 
-    -- Staple !
-    self:ocsp_staple(ssl_hostname, der_chain)
-
     ok, err = ssl.set_der_cert(der_chain)
     if not ok then
         log('Error %s, while setting der cert', err)
     end
+
+    -- Staple !
+    self:ocsp_staple(ssl_hostname, der_chain)
 
     local pkey_filename = self.conf.root..ssl_hostname..'.key'
     local der_priv
@@ -969,12 +969,17 @@ local challenge = function(self)
     log('Getting request for token: %s', token)
     local authz = self.cache:get('token:'..token)
     if not authz then
-        ngx.exit(404)
-    else
-        ngx.header.content_type = 'text/plain'
-        ngx.print(authz)
-        ngx.exit(200)
+        log('No token found in cache')
+        local account, _ = self:init_account()
+        authz = account.get_key_authz(token)
+        if not authz then
+            log('No token found in account file')
+            ngx.exit(404)
+        end
     end
+    ngx.header.content_type = 'text/plain'
+    ngx.print(authz)
+    ngx.exit(200)
 end
 
 local debug_output = function(self)
