@@ -668,7 +668,7 @@ _M.cert_for_host = function(self, host)
                 log("Updating authz...")
                 local updated, err = account.unsigned_request(authz.head.location or authz.url)
                 if not updated then
-                    log("Failed to update authz: %s", tostring(err()))
+                    log("Failed to update authz: %s", tostring(err))
                     break
                 else
                     hosts[host], authz = updated, updated
