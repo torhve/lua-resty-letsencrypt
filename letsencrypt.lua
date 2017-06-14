@@ -668,7 +668,7 @@ _M.cert_for_host = function(self, host)
                 log("Updating authz...")
                 local updated, err = account.unsigned_request(authz.head.location or authz.url)
                 if not updated then
-                    log("Failed to update authz: %s", tostring(err()))
+                    log("Failed to update authz: %s", tostring(err))
                     break
                 else
                     hosts[host], authz = updated, updated
@@ -878,10 +878,10 @@ _M.ssl = function(self)
     local ssl_hostname = ssl.server_name() or ''
 
     -- Check if ssl_hostname is in list of allowed domains
-    if not tableHasValue(self.conf.domains, ssl_hostname) then
-        log('Request for non-configured domain: %s. Returning fallback cert.', ssl_hostname)
-        return
-    end
+    -- if not tableHasValue(self.conf.domains, ssl_hostname) then
+        -- log('Request for non-configured domain: %s. Returning fallback cert.', ssl_hostname)
+        -- return
+    -- end
 
     local ok, err, _
 
