@@ -878,10 +878,10 @@ _M.ssl = function(self)
     local ssl_hostname = ssl.server_name() or ''
 
     -- Check if ssl_hostname is in list of allowed domains
-    if not tableHasValue(self.conf.domains, ssl_hostname) then
-        log('Request for non-configured domain: %s. Returning fallback cert.', ssl_hostname)
-        return
-    end
+    -- if not tableHasValue(self.conf.domains, ssl_hostname) then
+        -- log('Request for non-configured domain: %s. Returning fallback cert.', ssl_hostname)
+        -- return
+    -- end
 
     local ok, err, _
 
